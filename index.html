@@ -2,27 +2,85 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Lulee</title>
+    <title>Biomes</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
       body {
         margin: 0;
+        background: #0f0a1a;
+        color: #e8d9ff;
+        font-family: "Roboto Mono", monospace; /* ✅ new default font */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 16px;
+      }
+
+      h1 {
+        font-size: 1.4rem;
+        margin-bottom: 12px;
+      }
+
+      .biome-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, 180px);
+        gap: 12px;
+        width: 100%;
+        max-width: 600px;
+        justify-content: center;
+      }
+
+      .biome-card {
+        width: 180px;
+        background: #1a102b;
+        border-radius: 8px;
         overflow: hidden;
+        border: 2px solid #b57bff;
+        cursor: pointer;
+        text-decoration: none;
+        color: inherit;
+        transition: 0.12s ease;
+        display: flex;
+        flex-direction: column;
+        line-height: 0; /* ✅ removes phantom spacing */
       }
 
-      canvas {
-        display: block;
+      .biome-card:hover {
+        transform: translateY(-2px);
+        border-color: #d6a8ff;
       }
 
-      .nipple {
-        pointer-events: none !important;
-        z-index: 9999 !important;
-        transform: translateY(-50%) !important;
+      .biome-image {
+        width: 100%;
+        height: 85px;
+        object-fit: cover;
+        display: block; /* ✅ removes inline spacing */
+      }
+
+      .biome-footer {
+        height: 18px;
+        font-size: 0.65rem;
+        line-height: 1;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #120a20;
       }
     </style>
-    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   </head>
+
   <body>
-    <canvas id="gameCanvas"></canvas>
-    <script type="module" src="/main.ts"></script>
+    <h1>🪻 Select a Biome</h1>
+
+    <div class="biome-grid">
+      <a href="./forest.html" class="biome-card" target="_self">
+        <img src="public/forest.png" class="biome-image" />
+        <div class="biome-footer">Forest</div>
+      </a>
+    </div>
   </body>
 </html>
