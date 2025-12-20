@@ -8,6 +8,6 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    rollupOptions: { input: { main: 'index.html', forest: 'forest.html' } }
+    rollupOptions: { input: { main: 'index.html', forest: 'forest/index.html' } }
   },
 });
