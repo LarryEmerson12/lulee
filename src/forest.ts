@@ -21,14 +21,14 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(10, 20, 10);
 scene.add(ambientLight, dirLight);
 
-// === Player Logic ===
+// === Player Systems ===
 const playerPivot = new THREE.Object3D(); 
 scene.add(playerPivot);
 
 const controls = new PointerLockControls(camera, document.body);
 document.body.addEventListener('click', () => controls.lock());
 
-// === Materials & Player Mesh ===
+// === Materials ===
 const grassMaterial = new THREE.MeshBasicMaterial({ color: 0x40ee95 });
 const waterMaterial = new THREE.MeshBasicMaterial({ color: 0x44bfd2 });
 const logMaterial = new THREE.MeshBasicMaterial({ color: 0x8b5a2b });
@@ -39,6 +39,24 @@ const playerMesh = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color: 0x6a0dad })
 );
 scene.add(playerMesh);
+
+// === Single Face Darkness Highlight ===
+// Instead of a box, we use a flat plane to only darken the visible face
+const highlightPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.01, 1.01), // Slightly larger to prevent Z-fighting
+  new THREE.MeshBasicMaterial({ 
+    color: 0x000000, 
+    transparent: true, 
+    opacity: 0.3,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  })
+);
+highlightPlane.visible = false;
+scene.add(highlightPlane);
+
+const raycaster = new THREE.Raycaster();
+raycaster.far = 10;
 
 // === Infinite Terrain System ===
 const CHUNK_SIZE = 16;
@@ -53,8 +71,8 @@ function generateChunk(cx: number, cz: number) {
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const water = new THREE.InstancedMesh(geo, waterMaterial, CHUNK_SIZE * CHUNK_SIZE * 4);
   const grass = new THREE.InstancedMesh(geo, grassMaterial, CHUNK_SIZE * CHUNK_SIZE * MAX_HEIGHT);
-  const logs = new THREE.InstancedMesh(geo, logMaterial, 200);
-  const leaves = new THREE.InstancedMesh(geo, leafMaterial, 2000);
+  const logs = new THREE.InstancedMesh(geo, logMaterial, 1000); 
+  const leaves = new THREE.InstancedMesh(geo, leafMaterial, 10000);
   const dummy = new THREE.Object3D();
 
   let wi = 0, gi = 0, li = 0, fi = 0;
@@ -72,27 +90,23 @@ function generateChunk(cx: number, cz: number) {
         else grass.setMatrixAt(gi++, dummy.matrix);
       }
 
-      // === Tree Generation with Pyramid Top ===
-      if (h > 3 && (noise2D(wx * 0.2, wz * 0.2) + 1) / 2 > 0.85) {
-        // Trunk (3 blocks high)
-        for(let i=1; i<=3; i++) { 
-           dummy.position.set(wx, h+i, wz); dummy.updateMatrix(); logs.setMatrixAt(li++, dummy.matrix); 
+      // TREES: 0.85 threshold for Minecraft-style density
+      const treeNoise = (noise2D(wx * 0.4, wz * 0.4) + 1) / 2;
+      if (h > 3 && treeNoise > 0.85) {
+        for(let i = 1; i <= 3; i++) { 
+           dummy.position.set(wx, h + i, wz); dummy.updateMatrix(); logs.setMatrixAt(li++, dummy.matrix); 
         }
-        
-        // Leaf Layer 1: Base (5x5)
-        for(let dx=-2; dx<=2; dx++) {
-          for(let dz=-2; dz<=2; dz++) {
-            dummy.position.set(wx+dx, h+3, wz+dz); dummy.updateMatrix(); leaves.setMatrixAt(fi++, dummy.matrix);
+        for(let dx = -2; dx <= 2; dx++) {
+          for(let dz = -2; dz <= 2; dz++) {
+            dummy.position.set(wx + dx, h + 3, wz + dz); dummy.updateMatrix(); leaves.setMatrixAt(fi++, dummy.matrix);
           }
         }
-        // Leaf Layer 2: Mid (3x3)
-        for(let dx=-1; dx<=1; dx++) {
-          for(let dz=-1; dz<=1; dz++) {
-            dummy.position.set(wx+dx, h+4, wz+dz); dummy.updateMatrix(); leaves.setMatrixAt(fi++, dummy.matrix);
+        for(let dx = -1; dx <= 1; dx++) {
+          for(let dz = -1; dz <= 1; dz++) {
+            dummy.position.set(wx + dx, h + 4, wz + dz); dummy.updateMatrix(); leaves.setMatrixAt(fi++, dummy.matrix);
           }
         }
-        // Leaf Layer 3: Crown (1 block - The pyramid tip!)
-        dummy.position.set(wx, h+5, wz); dummy.updateMatrix(); leaves.setMatrixAt(fi++, dummy.matrix);
+        dummy.position.set(wx, h + 5, wz); dummy.updateMatrix(); leaves.setMatrixAt(fi++, dummy.matrix);
       }
     }
   }
@@ -112,10 +126,9 @@ function updateChunks() {
   }
 }
 
-// === Controls & Movement ===
+// === Movement State ===
 const keysPressed: Record<string, boolean> = {};
-let velocityY = 0, isGrounded = true, sprint = 1;
-let thirdPerson = false;
+let velocityY = 0, isGrounded = true, sprint = 1, thirdPerson = false;
 
 window.addEventListener('keydown', (e) => {
   keysPressed[e.key.toLowerCase()] = true;
@@ -128,10 +141,9 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 'Shift') sprint = 1;
 });
 
-// Joystick
 let joyX = 0, joyZ = 0;
 const joystick = nipplejs.create({
-  zone: document.body, mode: 'static', position: { left: '80px', top: '50%' }, color: 'black', size: 100
+  zone: document.body, mode: 'static', position: { left: '80px', top: '50%' }, color: 'white', size: 100
 });
 joystick.on('move', (e, d) => { joyX = Math.cos(d.angle.radian) * d.force; joyZ = -Math.sin(d.angle.radian) * d.force; });
 joystick.on('end', () => { joyX = 0; joyZ = 0; });
@@ -143,18 +155,14 @@ function animate() {
 
   const forward = new THREE.Vector3();
   camera.getWorldDirection(forward);
-  forward.y = 0; 
-  forward.normalize();
-
-  const right = new THREE.Vector3();
-  right.crossVectors(camera.up, forward).negate(); 
+  forward.y = 0; forward.normalize();
+  const right = new THREE.Vector3().crossVectors(camera.up, forward).negate(); 
 
   const moveVec = new THREE.Vector3(0, 0, 0);
   if (keysPressed['w']) moveVec.add(forward);
   if (keysPressed['s']) moveVec.add(forward.clone().negate());
   if (keysPressed['a']) moveVec.add(right.clone().negate());
   if (keysPressed['d']) moveVec.add(right);
-
   moveVec.add(forward.clone().multiplyScalar(-joyZ));
   moveVec.add(right.clone().multiplyScalar(joyX));
 
@@ -163,32 +171,54 @@ function animate() {
     playerPivot.position.addScaledVector(moveVec, 0.15 * sprint);
   }
 
-  // Physics
   velocityY -= 0.01;
   playerPivot.position.y += velocityY;
   const terrainY = terrainHeightMap.get(`${Math.floor(playerPivot.position.x)},${Math.floor(playerPivot.position.z)}`) ?? 0;
   if (playerPivot.position.y <= terrainY + 0.8) {
     playerPivot.position.y = terrainY + 0.8;
-    velocityY = 0;
-    isGrounded = true;
+    velocityY = 0; isGrounded = true;
   }
 
-  // Mesh Sync
   playerMesh.position.copy(playerPivot.position);
   playerMesh.rotation.y = Math.atan2(forward.x, forward.z);
 
-  // Camera Positioning
   if (thirdPerson) {
     const backDir = forward.clone().negate();
-    const targetCamPos = playerPivot.position.clone()
-      .addScaledVector(backDir, 7) 
-      .add(new THREE.Vector3(0, 4, 0)); 
-    
-    camera.position.copy(targetCamPos);
-    camera.lookAt(playerPivot.position);
+    camera.position.copy(playerPivot.position).addScaledVector(backDir, 7).add(new THREE.Vector3(0, 4, 0));
+    camera.lookAt(playerPivot.position.clone().add(new THREE.Vector3(0, 1.2, 0)));
   } else {
     camera.position.copy(playerPivot.position).add(new THREE.Vector3(0, 0.6, 0));
   }
+
+  // === CORRECTED FACE-ONLY HIGHLIGHT ===
+  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  let found = false;
+  
+  for (const intersect of intersects) {
+    if (intersect.object instanceof THREE.InstancedMesh && intersect.object !== playerMesh) {
+      const matrix = new THREE.Matrix4();
+      intersect.object.getMatrixAt(intersect.instanceId!, matrix);
+      
+      const blockPos = new THREE.Vector3();
+      blockPos.setFromMatrixPosition(matrix);
+
+      // Get the normal of the hit face to determine which way to point the plane
+      const normal = intersect.face!.normal.clone();
+      normal.transformDirection(intersect.object.matrixWorld);
+
+      // Position the plane slightly offset from the block face
+      highlightPlane.position.copy(blockPos).add(normal.clone().multiplyScalar(0.505));
+      
+      // Rotate plane to match face
+      highlightPlane.lookAt(highlightPlane.position.clone().add(normal));
+
+      highlightPlane.visible = true;
+      found = true;
+      break;
+    }
+  }
+  if (!found) highlightPlane.visible = false;
 
   renderer.render(scene, camera);
 }
