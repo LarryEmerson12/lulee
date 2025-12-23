@@ -15,18 +15,26 @@ const renderer = new THREE.WebGLRenderer({
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-// === Lighting (CRITICAL: Prevents Black Screen) ===
+// === Lighting ===
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
 scene.add(ambientLight);
 const sunLight = new THREE.DirectionalLight(0xffffff, 0.5);
 sunLight.position.set(10, 20, 10);
 scene.add(sunLight);
 
-// === Player ===
+// === Player & Camera State ===
 const playerPivot = new THREE.Object3D();
 scene.add(playerPivot);
 const controls = new PointerLockControls(camera, document.body);
 document.body.addEventListener('click', () => controls.lock());
+
+let thirdPerson = false;
+const playerMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(0.6, 1.8, 0.6),
+  new THREE.MeshLambertMaterial({ color: 0x6a0dad })
+);
+playerMesh.visible = false;
+scene.add(playerMesh);
 
 // === Materials ===
 const stoneMaterial = new THREE.MeshLambertMaterial({ color: 0x9F9E9F });
@@ -51,6 +59,7 @@ const CHUNK_SIZE = 16;
 const RENDER_DISTANCE = 3;
 const blockMap = new Set<string>();
 const activeChunks = new Map<string, THREE.Group>();
+const waterMeshes: THREE.InstancedMesh[] = [];
 
 function addSolid(x: number, y: number, z: number) {
   blockMap.add(`${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`);
@@ -86,21 +95,21 @@ function generateChunk(cx: number, cz: number) {
           stone.setMatrixAt(si++, dummy.matrix);
           addSolid(wx, y, wz);
         } else if (h <= 3) {
-          water.setMatrixAt(wi++, dummy.matrix);
+          for(let wy=h; wy<=3; wy++){
+            dummy.position.set(wx, wy, wz); dummy.updateMatrix();
+            water.setMatrixAt(wi++, dummy.matrix);
+          }
         } else {
           grass.setMatrixAt(gi++, dummy.matrix);
           addSolid(wx, h, wz);
         }
       }
 
-      // Pyramid Trees (Collision updated)
       if (h > 3 && (noise2D(wx * 0.4, wz * 0.4) + 1) / 2 > 0.88) {
-        // Trunk
         for (let i = 1; i <= 3; i++) {
           dummy.position.set(wx, h + i, wz); dummy.updateMatrix();
           logs.setMatrixAt(li++, dummy.matrix); addSolid(wx, h + i, wz);
         }
-        // Leaves (Hollow underneath)
         for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
           dummy.position.set(wx+dx, h+3, wz+dz); dummy.updateMatrix();
           leaves.setMatrixAt(fi++, dummy.matrix); addSolid(wx + dx, h + 3, wz + dz);
@@ -117,6 +126,7 @@ function generateChunk(cx: number, cz: number) {
 
   stone.count = si; water.count = wi; grass.count = gi; logs.count = li; leaves.count = fi;
   chunkGroup.add(stone, water, grass, logs, leaves);
+  waterMeshes.push(water);
   scene.add(chunkGroup);
   activeChunks.set(key, chunkGroup);
 }
@@ -133,12 +143,24 @@ function updateChunks() {
 
 const keys: Record<string, boolean> = {};
 let velocityY = 0, isGrounded = false;
-window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keydown', (e) => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key.toLowerCase() === 'p') {
+    thirdPerson = !thirdPerson;
+    playerMesh.visible = thirdPerson;
+  }
+});
 window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
 
 function animate() {
   requestAnimationFrame(animate);
   updateChunks();
+
+  // Water Wobble Logic
+  const time = Date.now() * 0.002;
+  waterMeshes.forEach(m => {
+    m.position.y = Math.sin(time) * 0.1;
+  });
 
   const forward = new THREE.Vector3(); camera.getWorldDirection(forward); forward.y = 0; forward.normalize();
   const right = new THREE.Vector3().crossVectors(camera.up, forward).negate();
@@ -159,7 +181,6 @@ function animate() {
       playerPivot.position.x = nextX;
       playerPivot.position.z = nextZ;
     } else if (isStep && !isWall) {
-      // Auto-step: lift slightly to clear the 1-block height
       playerPivot.position.set(nextX, Math.floor(curY - 0.5) + 1.8, nextZ);
     }
   }
@@ -167,7 +188,6 @@ function animate() {
   velocityY -= 0.01;
   playerPivot.position.y += velocityY;
 
-  // Floor Collision
   if (isSolid(playerPivot.position.x, playerPivot.position.y - 1.0, playerPivot.position.z)) {
     playerPivot.position.y = Math.floor(playerPivot.position.y - 1.0) + 1.8;
     velocityY = 0;
@@ -178,11 +198,21 @@ function animate() {
 
   if (keys[' '] && isGrounded) { velocityY = 0.22; isGrounded = false; }
 
-  camera.position.copy(playerPivot.position).add(new THREE.Vector3(0, 0.6, 0));
+  // Third Person View Logic
+  playerMesh.position.copy(playerPivot.position).y -= 0.9;
+  if (move.lengthSq() > 0) playerMesh.rotation.y = Math.atan2(move.x, move.z);
+
+  if (thirdPerson) {
+    const backDir = forward.clone().negate();
+    camera.position.copy(playerPivot.position).addScaledVector(backDir, 5).add(new THREE.Vector3(0, 3, 0));
+    camera.lookAt(playerPivot.position);
+  } else {
+    camera.position.copy(playerPivot.position).add(new THREE.Vector3(0, 0.6, 0));
+  }
 
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
   const intersects = raycaster.intersectObjects(scene.children, true);
-  if (intersects.length > 0) {
+  if (intersects.length > 0 && intersects[0].object !== playerMesh) {
     const hit = intersects[0];
     if (hit.object instanceof THREE.InstancedMesh) {
       const m = new THREE.Matrix4(); hit.object.getMatrixAt(hit.instanceId!, m);
@@ -196,5 +226,5 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-playerPivot.position.set(0, 20, 0); // Spawning high up to avoid black screen inside blocks
+playerPivot.position.set(0, 20, 0);
 animate();
